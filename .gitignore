@@ -1,0 +1,20 @@
+# system and tools
+npm-debug.log
+/node_modules
+.DS_Store
+.gradle
+.metadata
+Thumbs.db
+Desktop.ini
+*.tmp
+*.bak
+*.sw?
+*.class
+*.jar
+default.properties
+local.properties
+gen
+
+# cordova
+/platforms
+/plugins

@@ -1,0 +1,30 @@
+{
+  "name": "com.example.webwrap",
+  "displayName": "Example",
+  "version": "1.0.0",
+  "description": "An example Cordova app wrapping a mobile website.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "wvengen",
+  "dependencies": {
+    "cordova-plugin-app-launcher": "^0.4.0",
+    "cordova-plugin-inappbrowser": "git+https://github.com/q-m/cordova-plugin-inappbrowser.git#2eacaa",
+    "cordova-plugin-network-information": "^2.0.1",
+    "cordova-plugin-whitelist": "^1.3.3",
+    "phonegap-plugin-barcodescanner": "^7.1.2"
+  },
+  "cordova": {
+    "plugins": {
+      "cordova-plugin-whitelist": {},
+      "cordova-plugin-inappbrowser": {},
+      "cordova-plugin-network-information": {},
+      "phonegap-plugin-barcodescanner": {
+        "ANDROID_SUPPORT_V4_VERSION": "27.+"
+      },
+      "cordova-plugin-app-launcher": {}
+    },
+    "platforms": []
+  }
+}
