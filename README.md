@@ -26,6 +26,12 @@ Features:
 3. [Check (and install) requirements](https://cordova.apache.org/docs/en/latest/guide/cli/index.html#install-pre-requisites-for-building): `cordova requirements`
 4. [Build](https://cordova.apache.org/docs/en/latest/guide/cli/index.html#build-the-app): `cordova build`
 
+### iOS
+
+On iOS `cordova build ios` may not be enough. After running this, you can open the folder `platforms/ios` in Xcode.
+In the warnings shown there are two items about updating build settings. Accept the modifications (ignoring the warning
+about uncommited changes), and build it from Xcode.
+
 ## Configure
 
 - Change `LANDING_URL` in [`www/js/index.js`](www/js/index.js#L21) to point to your mobile website.
