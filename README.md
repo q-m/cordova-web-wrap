@@ -77,7 +77,7 @@ The website can initiate a barcode scan by pointing to the custom url `app://mob
 When this link is followed, the barcode scanner is opened. On successful scan, it will return
 to the page indicated by the `ret` query string parameter passed that triggered opening the
 scanner. This is a [URL template](https://en.wikipedia.org/wiki/URL_Template) where `{CODE}` is
-replaced by the scanned barcode. Relative links are not supported.
+replaced by the scanned barcode. Links can be relative or absolute.
 
 An example. When following the link in the HTML shown below, a barcode scanner will
 be opened, and when barcode `12345` is scanned, the link `http://x.test/scan/12345`
