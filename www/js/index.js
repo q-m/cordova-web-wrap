@@ -118,6 +118,14 @@ var Fsm = machina.Fsm.extend({
       "resume"        : function()    { this.onResume(); },
       "conn.offline"  : "offline.blank",
     },
+
+    // iOS-specific workaround for loading a URL with hash twice
+    "loading.hashfix": {
+      _onEnter        : function(url) { this.hashfixUrl = url; this.showMessage("loading"); this._load("about:blank?gap-iab=hashfix"); },
+      "app.loadstop"  : function(e) { this.load(this.hashfixUrl); },
+      "app.loaderror" : function(e) { this.load(this.hashfixUrl); },
+      "conn.offline"  : "offline.blank",
+    },
   },
 
   initialize: function() {
@@ -158,21 +166,25 @@ var Fsm = machina.Fsm.extend({
     var _url = url || this.appLastUrl || LANDING_URL;
 
     this.loadedStopUrl = null;
-    this.appLastUrl = _url;
+    if (_url !== "about:blank?gap-iab=hashfix") this.appLastUrl = _url;
 
     // if no code is given, it means: keep the same message as before (relevant for e.g. redirects)
     if (messageCode) this.showMessage(messageCode);
 
+    this._load(_url);
+    this.transition("loading", messageCode);
+  },
+
+  _load: function(url) {
     if (!this.app) {
       // When there is no inAppBrowser yet, open it.
-      debug("load new: " + _url);
-      this.openBrowser(_url);
+      debug("load new: " + url);
+      this.openBrowser(url);
     } else {
       // Otherwise keep the browser open and navigate to the new URL.
-      debug("load existing: " + _url);
-      this.app.executeScript({ code: "window.location.assign(" + JSON.stringify(_url) + ");" });
+      debug("load existing: " + url);
+      this.app.executeScript({ code: "window.location.assign(" + JSON.stringify(url) + ");" });
     }
-    this.transition("loading", messageCode);
   },
 
   onLoading: function(messageCode) {
@@ -205,11 +217,6 @@ var Fsm = machina.Fsm.extend({
 
   onLoaded: function(e) {
     this.loadedStopUrl = null;
-    // Update last loaded URL
-    this.app.executeScript({ code: 'window.location.toString();' }, function(a) {
-      debug("setting appLastUrl from location: " + a[0]);
-      this.appLastUrl = a[0];
-    }.bind(this));
     // Allow LOCAL_URLS to be set by the page.
     this.app.executeScript({ code:
       '(function () {\n' +
@@ -302,6 +309,10 @@ var Fsm = machina.Fsm.extend({
     this.app.addEventListener("loaderror",    wrapEventListener(function(e) {
       if (window.cordova.platformId === 'ios' && e.code === -999) {
         debug("ignoring cancelled load on iOS: " + e.url + ": " + e.message);
+      } else if (window.cordova.platformId === 'ios' && e.url.includes("#") &&
+                 e.message === "CDVWebViewDelegate: Navigation started when state=1") {
+        debug("activating iOS hash navigation workaround for " + e.url + ": " + e.message);
+        this.transition("loading.hashfix", e.url);
       } else {
         debug("page load failed for " + e.url + ": " + e.message);
         this.handle("app.loaderror", e);
