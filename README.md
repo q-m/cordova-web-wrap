@@ -77,6 +77,11 @@ method kicks in when a script navigates to an external link (e.g. an embedded Go
 but this only happens _after_ the internal web browser has started loading the URL. This
 request is then cancelled.
 
+Please note that this last method triggered various subtle issues on iOS (and to a lesser
+extent on Android), which have been worked around where possible, but it remains tricky.
+So: be careful when opening pages from Javascript (work is
+[on the way](https://issues.apache.org/jira/browse/CB-14188) to improve this).
+
 ## Barcode scanner
 
 The website can initiate a barcode scan by pointing to the custom url `app://mobile-scan`.

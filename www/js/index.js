@@ -191,32 +191,14 @@ var Fsm = machina.Fsm.extend({
     // if no code is given, it means: keep the same message as before (relevant for e.g. redirects)
     if (messageCode) this.showMessage(messageCode);
 
-    // Catch links that were clicked to route external ones through our custom protocol.
-    // We'd rather not do this in the loadstart event, because the page then already started loading.
-    this.app.executeScript({ code:
-      'window.addEventListener("click", function(e) {\n' +
-      '  if (e.target.tagName !== "A") return;\n' +
-      '  var href = e.target.href;\n' +
-      '  if (!href || href.startsWith("app:")) return;\n' +
-      '  var BASE_URL     = ' + JSON.stringify(BASE_URL) + ';\n' +
-      '  var SPLIT_URL_RE = ' + SPLIT_URL_RE.toString() + ';\n' +
-      '  var localUrlRe   = ' + this.localUrlRe.toString() + ';\n' +
-      '  var parts = href.match(SPLIT_URL_RE);\n' +
-      '  var base = parts[1], path = parts[2];\n' +
-      '  if (!(base + path).match(localUrlRe) && !(base === BASE_URL && path.match(localUrlRe))) {\n' +
-      '    e.preventDefault();\n' +
-      '    window.location.assign("app://open?url=" + encodeURIComponent(href));\n' +
-      '  }\n' +
-      '});\n' +
-      'console.log("installed click event listener for external links");\n'
-    }, function() {
-      // Also log in app console.
-      debug("installed click event listener for external links");
-    });
+    // For iOS, this is enough; on Android we do this onLoaded too.
+    this.installClickListener();
   },
 
   onLoaded: function(e) {
     this.loadedStopUrl = null;
+    // On Android loadstart is sometimes too early, do it here too.
+    if (window.cordova.platformId === 'android') this.installClickListener();
     // Allow LOCAL_URLS to be set by the page.
     this.app.executeScript({ code:
       '(function () {\n' +
@@ -243,28 +225,29 @@ var Fsm = machina.Fsm.extend({
       debug("opening external link (not caught on page): " + e.url);
       // Cancel navigation of inAppBrowser. This is a bit of a hack, so the event listener
       // installed in onLoaded is preferable (which also avoids the initial request).
-      if (window.cordova.platformId === 'android') {
-        this.openSystemBrowser(e.url);
-        this.app.executeScript({ code: 'window.location.replace(window.location);' });
-      } else {
-        this.onNavigateExtIOS(e.url);
-      }
+      this.onNavigateExt(e.url);
     }
   },
 
-  onNavigateExtIOS: _.debounce(function(url) {
+  onNavigateExt: _.debounce(function(url) {
     // First try to get currently loaded page, so we can reload it when coming back.
-    this.app.executeScript({ code: 'window.location.toString()' }, function(a) {
-      setTimeout(function() {
-        this.showMessage("loading");
-        debug("got as current url: " + a[0]);
-        // Sometimes we get the previous URL, sometimes the current.
-        this.appLastUrl = this.isLocalUrl(a[0]) ? a[0] : LANDING_URL;
-        debug("on return will go back to: " + this.appLastUrl);
+    // (debounce is needed on iOS, where onNavigate is called several times for one click)
+    this.app.executeScript({ code: 'window.location.toString()' }, wrapEventListener(function(a) {
+      this.showMessage("loading");
+      debug("got as current url: " + a[0]);
+      // Sometimes we get the previous URL, sometimes the current.
+      this.appLastUrl = this.isLocalUrl(a[0]) ? a[0] : LANDING_URL;
+      debug("on return will go back to: " + this.appLastUrl);
+      if (window.cordova.platformId === 'ios') {
+        // On iOS we need to take care to not mess up the WebView, use custom states for that.
         // There may have been a loadstop event in the meantime. Detected by loadedStopUrl.
         this.transition(this.loadedStopUrl === null ? "loading.ext" : "paused.ext", url);
-      }.bind(this), 0);
-    }.bind(this));
+      } else {
+        // On Android we can just load the previous URL directly.
+        this.openSystemBrowser(url);
+        this.load(this.appLastUrl, "loading");
+      }
+    }.bind(this)));
   }, 500, { rising: true, falling: false }),
 
   onCustomScheme: function(e) {
@@ -405,6 +388,31 @@ var Fsm = machina.Fsm.extend({
       var base = parts[1], path = parts[2];
       return (base + path).match(this.localUrlRe) || (base === BASE_URL && path.match(this.localUrlRe));
     }
+  },
+
+  installClickListener: function() {
+    // Catch links that were clicked to route external ones through our custom protocol.
+    // We'd rather not do this in the loadstart event, because the page then already started loading.
+    this.app.executeScript({ code:
+      'window.addEventListener("click", function(e) {\n' +
+      '  if (e.target.tagName !== "A") return;\n' +
+      '  var href = e.target.href;\n' +
+      '  if (!href || href.startsWith("app:")) return;\n' +
+      '  var BASE_URL     = ' + JSON.stringify(BASE_URL) + ';\n' +
+      '  var SPLIT_URL_RE = ' + SPLIT_URL_RE.toString() + ';\n' +
+      '  var localUrlRe   = ' + this.localUrlRe.toString() + ';\n' +
+      '  var parts = href.match(SPLIT_URL_RE);\n' +
+      '  var base = parts[1], path = parts[2];\n' +
+      '  if (!(base + path).match(localUrlRe) && !(base === BASE_URL && path.match(localUrlRe))) {\n' +
+      '    e.preventDefault();\n' +
+      '    window.location.assign("app://open?url=" + encodeURIComponent(href));\n' +
+      '  }\n' +
+      '});\n' +
+      'console.log("installed click event listener for external links");\n'
+    }, function() {
+      // Also log in app console.
+      debug("installed click event listener for external links");
+    });
   }
 });
 var fsm = new Fsm();
