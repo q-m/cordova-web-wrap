@@ -2,6 +2,17 @@
 // Message functions, see https://stackoverflow.com/a/32928812/2866660
 var debug = console.log.bind(window.console);
 
+// Wraps event listener in a setTimeout() on iOS (or risk WebView problems)
+if (window.cordova.platformId === 'ios') {
+  function wrapEventListener(listener) {
+    setTimeout(listener.bind(this), 0);
+  }
+} else {
+  function wrapEventListener(listener) {
+    return listener;
+  }
+}
+
 // Parse query string from a URL into an object.
 // after https://www.joezimjs.com/javascript/3-ways-to-parse-a-query-string-in-a-url/
 var parseQueryString = function(url) {

@@ -37,6 +37,9 @@ var Fsm = machina.Fsm.extend({
 
   initialState: "starting",
 
+  appLastUrl: null,
+  loadedStopUrl: null, // for iOS external browser hack
+
   states: {
 
     // We're starting up (Cordova may not be ready yet).
@@ -54,6 +57,7 @@ var Fsm = machina.Fsm.extend({
     // Load the page we want to show.
     "loading": {
       _onEnter        : function(e) { this.onLoading(e); },
+      "app.loadstart" : function(e) { this.onNavigate(e); },
       "app.loadstop"  : "loaded",
       "app.loaderror" : "failed",
       "pause"         : "paused",
@@ -73,6 +77,8 @@ var Fsm = machina.Fsm.extend({
     "loaded": {
       _onEnter        : function()  { this.onLoaded(); },
       "app.loadstart" : function(e) { this.onNavigate(e); },
+      "app.loadstop"  : function(e) { this.loadedStopUrl = e.url; }, // for iOS external browser open hack
+      "app.loaderror" : function(e) { this.loadedStopUrl = e.url; }, // for iOS external browser open hack
       "app.exit"      : function()  { this.onBrowserBack(); }, // top of navigation and back pressed
       "conn.offline"  : "offline.loaded",
     },
@@ -80,7 +86,7 @@ var Fsm = machina.Fsm.extend({
     // Page load failed.
     "failed": {
       _onEnter       : function() { this.onFailed(); },
-      "retry"        : function() { this.load(); },
+      "retry"        : function() { this.load(null, "loading"); },
       "conn.offline" : "offline.blank",
     },
 
@@ -94,6 +100,23 @@ var Fsm = machina.Fsm.extend({
     "offline.loaded": {
       _onEnter      : function() { this.onOfflineLoaded(); },
       "conn.online" : "loaded",
+    },
+
+    // iOS-specific state while finishing load of page before opening external browser.
+    // If we don't wait but move on, after coming back and re-loading the page, the
+    // app often crashes (with `EXC_BAD_ACCESS (code=1, address=0x...)`).
+    "loading.ext": {
+      _onEnter        : function(url) { this.extUrl = url; this.showMessage("loading"); },
+      "app.loadstop"  : function(e) { if (e.url === this.extUrl) this.transition("paused.ext", this.extUrl); },
+      "app.loaderror" : function(e) { if (e.url === this.extUrl) this.transition("paused.ext", this.extUrl); },
+      "conn.offline"  : "offline.blank",
+    },
+
+    // iOS-specific state during showing external browser.
+    "paused.ext": {
+      _onEnter        : function(url) { this.openSystemBrowser(url); },
+      "resume"        : function()    { this.onResume(); },
+      "conn.offline"  : "offline.blank",
     },
   },
 
@@ -116,23 +139,25 @@ var Fsm = machina.Fsm.extend({
   },
 
   onStarted: function() {
-    document.addEventListener("online",  this.handle.bind(this, "conn.online"), false);
-    document.addEventListener("offline", this.handle.bind(this, "conn.offline"), false);
+    document.addEventListener("online",  wrapEventListener(this.handle.bind(this, "conn.online")), false);
+    document.addEventListener("offline", wrapEventListener(this.handle.bind(this, "conn.offline")), false);
     // retry button (debounce 0.5s)
     document.getElementById("retry").addEventListener("click", _.debounce(this.handle.bind(this, "retry"), 500), false);
     // run handler on main thread (iOS) - https://cordova.apache.org/docs/en/latest/cordova/events/events.html#ios-quirks
-    document.addEventListener("pause",   function() { setTimeout(this.handle.bind(this, "pause" ), 0); }.bind(this), false);
-    document.addEventListener("resume",  function() { setTimeout(this.handle.bind(this, "resume"), 0); }.bind(this), false);
+    document.addEventListener("pause",   wrapEventListener(this.handle.bind(this, "pause")), false);
+    document.addEventListener("resume",  wrapEventListener(this.handle.bind(this, "resume")), false);
 
-    this.openBrowser();
-
-    if (navigator.splashscreen) navigator.splashscreen.hide();
-    this.load(LANDING_URL, "loading");
+    // allow state transition to happen after this one
+    setTimeout(function() {
+      if (navigator.splashscreen) navigator.splashscreen.hide();
+      this.load(LANDING_URL, "loading");
+    }.bind(this), 0);
   },
 
   load: function(url, messageCode) {
     var _url = url || this.appLastUrl || LANDING_URL;
 
+    this.loadedStopUrl = null;
     this.appLastUrl = _url;
 
     // if no code is given, it means: keep the same message as before (relevant for e.g. redirects)
@@ -153,18 +178,7 @@ var Fsm = machina.Fsm.extend({
   onLoading: function(messageCode) {
     // if no code is given, it means: keep the same message as before (relevant for e.g. redirects)
     if (messageCode) this.showMessage(messageCode);
-  },
 
-  onLoaded: function() {
-    // Allow LOCAL_URLS to be set by the page.
-    this.app.executeScript({ code:
-      '(function () {\n' +
-      '  var el = document.querySelector("[data-app-local-urls]");\n' +
-      '  if (el) return el.getAttribute("data-app-local-urls");\n' +
-      '})();'
-    }, function(localUrls) {
-      if (localUrls && localUrls[0]) this.setLocalUrls(localUrls[0]);
-    }.bind(this));
     // Catch links that were clicked to route external ones through our custom protocol.
     // We'd rather not do this in the loadstart event, because the page then already started loading.
     this.app.executeScript({ code:
@@ -183,16 +197,35 @@ var Fsm = machina.Fsm.extend({
       '  }\n' +
       '});\n' +
       'console.log("installed click event listener for external links");\n'
+    }, function() {
+      // Also log in app console.
+      debug("installed click event listener for external links");
     });
+  },
+
+  onLoaded: function(e) {
+    this.loadedStopUrl = null;
+    // Update last loaded URL
+    this.app.executeScript({ code: 'window.location.toString();' }, function(a) {
+      debug("setting appLastUrl from location: " + a[0]);
+      this.appLastUrl = a[0];
+    }.bind(this));
+    // Allow LOCAL_URLS to be set by the page.
+    this.app.executeScript({ code:
+      '(function () {\n' +
+      '  var el = document.querySelector("[data-app-local-urls]");\n' +
+      '  if (el) return el.getAttribute("data-app-local-urls");\n' +
+      '})();'
+    }, function(localUrls) {
+      if (localUrls && localUrls[0]) this.setLocalUrls(localUrls[0]);
+    }.bind(this));
     // Show the page.
     this.showMessage(null);
     this.app.show();
   },
 
   onNavigate: function(e) {
-    var parts = e.url.match(SPLIT_URL_RE);
-    var base = parts[1], path = parts[2];
-    if ((base + path).match(this.localUrlRe) || (base === BASE_URL && path.match(this.localUrlRe))) {
+    if (this.isLocalUrl(e.url)) {
       // Internal link followed.
       debug("opening internal link: " + e.url);
       this.appLastUrl = e.url;
@@ -201,12 +234,31 @@ var Fsm = machina.Fsm.extend({
       // External link opened. Should be unreachable code because of the onLoaded() code injection,
       // but might happen if javascript opens a link (e.g. embedded Google Map).
       debug("opening external link (not caught on page): " + e.url);
-      this.openSystemBrowser(e.url);
       // Cancel navigation of inAppBrowser. This is a bit of a hack, so the event listener
       // installed in onLoaded is preferable (which also avoids the initial request).
-      this.app.executeScript({ code: 'window.location.replace(window.location);' });
+      if (window.cordova.platformId === 'android') {
+        this.openSystemBrowser(e.url);
+        this.app.executeScript({ code: 'window.location.replace(window.location);' });
+      } else {
+        this.onNavigateExtIOS(e.url);
+      }
     }
   },
+
+  onNavigateExtIOS: _.debounce(function(url) {
+    // First try to get currently loaded page, so we can reload it when coming back.
+    this.app.executeScript({ code: 'window.location.toString()' }, function(a) {
+      setTimeout(function() {
+        this.showMessage("loading");
+        debug("got as current url: " + a[0]);
+        // Sometimes we get the previous URL, sometimes the current.
+        this.appLastUrl = this.isLocalUrl(a[0]) ? a[0] : LANDING_URL;
+        debug("on return will go back to: " + this.appLastUrl);
+        // There may have been a loadstop event in the meantime. Detected by loadedStopUrl.
+        this.transition(this.loadedStopUrl === null ? "loading.ext" : "paused.ext", url);
+      }.bind(this), 0);
+    }.bind(this));
+  }, 500, { rising: true, falling: false }),
 
   onCustomScheme: function(e) {
     debug("custom scheme: " + e.url);
@@ -244,15 +296,19 @@ var Fsm = machina.Fsm.extend({
   openBrowser: function(url) {
     var _url = url || this.appLastUrl || LANDING_URL;
     this.app = cordova.InAppBrowser.open(_url, "_blank", "location=no,zoom=no,shouldPauseOnSuspend=yes,toolbar=no,hidden=yes");
-    // Get info from inAppBrowser events. No actions, just saving state and logging.
-    this.app.addEventListener("loadstop",     function(e) { this.appLastUrl = e.url; }.bind(this), false);
-    this.app.addEventListener("loaderror",    function(e) { debug("page load failed: " + e.message); }, false);
     // Connect state-machine to inAppBrowser events.
-    this.app.addEventListener("loadstart",    this.handle.bind(this, "app.loadstart"), false);
-    this.app.addEventListener("loadstop",     this.handle.bind(this, "app.loadstop"), false);
-    this.app.addEventListener("loaderror",    this.handle.bind(this, "app.loaderror"), false);
-    this.app.addEventListener("exit",         this.handle.bind(this, "app.exit"), false);
-    this.app.addEventListener("customscheme", this.onCustomScheme.bind(this), false);
+    this.app.addEventListener("loadstart",    wrapEventListener(this.handle.bind(this, "app.loadstart")), false);
+    this.app.addEventListener("loadstop",     wrapEventListener(this.handle.bind(this, "app.loadstop")), false);
+    this.app.addEventListener("loaderror",    wrapEventListener(function(e) {
+      if (window.cordova.platformId === 'ios' && e.code === -999) {
+        debug("ignoring cancelled load on iOS: " + e.url + ": " + e.message);
+      } else {
+        debug("page load failed for " + e.url + ": " + e.message);
+        this.handle("app.loaderror", e);
+      }
+    }.bind(this)), false);
+    this.app.addEventListener("exit",         wrapEventListener(this.handle.bind(this, "app.exit")), false);
+    this.app.addEventListener("customscheme", wrapEventListener(this.onCustomScheme.bind(this)), false);
   },
 
   openSystemBrowser: function(url) {
@@ -330,6 +386,14 @@ var Fsm = machina.Fsm.extend({
     this.localUrlRe = new RegExp('^(' + urls.trim().split(/\s+/).map(function(s) {
       return s.replace(/([.*+?^${}()|\[\]\/\\])/g, '\\$1').replace('\\*', '.*');
     }).join('|') + ')$');
+  },
+
+  isLocalUrl: function(url) {
+    var parts = url.match(SPLIT_URL_RE);
+    if (parts) {
+      var base = parts[1], path = parts[2];
+      return (base + path).match(this.localUrlRe) || (base === BASE_URL && path.match(this.localUrlRe));
+    }
   }
 });
 var fsm = new Fsm();
