@@ -3,6 +3,8 @@
   "displayName": "Example",
   "version": "1.0.0",
   "description": "An example Cordova app wrapping a mobile website.",
+  "homepage": "https://github.com/q-m/cordova-web-wrap",
+  "license": "Apache-2.0",
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"

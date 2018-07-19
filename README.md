@@ -160,3 +160,7 @@ there after a machina upgrade, check if a missing method is used):
 * [HTML-5 Cordova webapp](https://github.com/krisrak/html5-cordova-webapp/)
 * [Is This Thing On?](https://www.telerik.com/blogs/is-this-thing-on-(part-1)), on state management for connection status
 * [Cordova documentation](https://cordova.apache.org/docs/en/latest/)
+
+## License
+
+This project is licensed under the [Apache 2.0](LICENSE.md) license.
