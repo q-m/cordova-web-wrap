@@ -330,6 +330,8 @@ var Fsm = machina.Fsm.extend({
       function(error) {
         debug("scan failed: " + error);
         alert("Scan failed: " + error);
+        // necessary on iOS, see below
+        if (window.cordova.platformId === 'ios') this.showMessage(null);
       }.bind(this),
       {
         saveHistory: true,
