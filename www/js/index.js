@@ -38,7 +38,6 @@ var Fsm = machina.Fsm.extend({
   initialState: "starting",
 
   appLastUrl: null,
-  loadedStopUrl: null, // for iOS external browser hack
 
   states: {
 
@@ -56,12 +55,12 @@ var Fsm = machina.Fsm.extend({
 
     // Load the page we want to show.
     "loading": {
-      _onEnter        : function(e) { this.onLoading(e); },
-      "app.loadstart" : function(e) { this.onNavigate(e); },
-      "app.loadstop"  : "loaded",
-      "app.loaderror" : "failed",
-      "pause"         : "paused",
-      "conn.offline"  : "offline.blank",
+      _onEnter         : function(e)     { this.onLoading(e); },
+      "app.beforeload" : function(e, cb) { this.onNavigate(e, cb); },
+      "app.loadstop"   : "loaded",
+      "app.loaderror"  : "failed",
+      "pause"          : "paused",
+      "conn.offline"   : "offline.blank",
     },
 
     // Paused during page load.
@@ -75,12 +74,10 @@ var Fsm = machina.Fsm.extend({
 
     // Page was succesfully loaded in the inAppBrowser.
     "loaded": {
-      _onEnter        : function()  { this.onLoaded(); },
-      "app.loadstart" : function(e) { this.onNavigate(e); },
-      "app.loadstop"  : function(e) { this.loadedStopUrl = e.url; }, // for iOS external browser open hack
-      "app.loaderror" : function(e) { this.loadedStopUrl = e.url; }, // for iOS external browser open hack
-      "app.exit"      : function()  { this.onBrowserBack(); }, // top of navigation and back pressed
-      "conn.offline"  : "offline.loaded",
+      _onEnter         : function()      { this.onLoaded(); },
+      "app.beforeload" : function(e, cb) { this.onNavigate(e, cb); },
+      "app.exit"       : function()      { this.onBrowserBack(); }, // top of navigation and back pressed
+      "conn.offline"   : "offline.loaded",
     },
 
     // Page load failed.
@@ -100,32 +97,7 @@ var Fsm = machina.Fsm.extend({
     "offline.loaded": {
       _onEnter      : function() { this.onOfflineLoaded(); },
       "conn.online" : "loaded",
-    },
-
-    // iOS-specific state while finishing load of page before opening external browser.
-    // If we don't wait but move on, after coming back and re-loading the page, the
-    // app often crashes (with `EXC_BAD_ACCESS (code=1, address=0x...)`).
-    "loading.ext": {
-      _onEnter        : function(url) { this.extUrl = url; this.showMessage("loading"); },
-      "app.loadstop"  : function(e) { if (e.url === this.extUrl) this.transition("paused.ext", this.extUrl); },
-      "app.loaderror" : function(e) { if (e.url === this.extUrl) this.transition("paused.ext", this.extUrl); },
-      "conn.offline"  : "offline.blank",
-    },
-
-    // iOS-specific state during showing external browser.
-    "paused.ext": {
-      _onEnter        : function(url) { this.openSystemBrowser(url); },
-      "resume"        : function()    { this.onResume(); },
-      "conn.offline"  : "offline.blank",
-    },
-
-    // iOS-specific workaround for loading a URL with hash twice
-    "loading.hashfix": {
-      _onEnter        : function(url) { this.hashfixUrl = url; this.showMessage("loading"); this._load("about:blank?gap-iab=hashfix"); },
-      "app.loadstop"  : function(e) { this.load(this.hashfixUrl); },
-      "app.loaderror" : function(e) { this.load(this.hashfixUrl); },
-      "conn.offline"  : "offline.blank",
-    },
+    }
   },
 
   initialize: function() {
@@ -165,11 +137,7 @@ var Fsm = machina.Fsm.extend({
   load: function(url, messageCode) {
     var _url = url || this.appLastUrl || LANDING_URL;
 
-    this.loadedStopUrl = null;
-    if (_url !== "about:blank?gap-iab=hashfix") this.appLastUrl = _url;
-
-    // if no code is given, it means: keep the same message as before (relevant for e.g. redirects)
-    if (messageCode) this.showMessage(messageCode);
+    this.appLastUrl = _url;
 
     this._load(_url);
     this.transition("loading", messageCode);
@@ -190,15 +158,9 @@ var Fsm = machina.Fsm.extend({
   onLoading: function(messageCode) {
     // if no code is given, it means: keep the same message as before (relevant for e.g. redirects)
     if (messageCode) this.showMessage(messageCode);
-
-    // For iOS, this is enough; on Android we do this onLoaded too.
-    this.installClickListener();
   },
 
   onLoaded: function(e) {
-    this.loadedStopUrl = null;
-    // On Android loadstart is sometimes too early, do it here too.
-    if (window.cordova.platformId === 'android') this.installClickListener();
     // Allow LOCAL_URLS to be set by the page.
     this.app.executeScript({ code:
       '(function () {\n' +
@@ -213,52 +175,19 @@ var Fsm = machina.Fsm.extend({
     this.app.show();
   },
 
-  onNavigate: function(e) {
-    if (this.isLocalUrl(e.url)) {
-      // Internal link followed.
-      debug("opening internal link: " + e.url);
-      this.appLastUrl = e.url;
-      this.transition("loading", null);
-    } else {
-      // External link opened. Should be unreachable code because of the onLoaded() code injection,
-      // but might happen if javascript opens a link (e.g. embedded Google Map).
-      debug("opening external link (not caught on page): " + e.url);
-      // Cancel navigation of inAppBrowser. This is a bit of a hack, so the event listener
-      // installed in onLoaded is preferable (which also avoids the initial request).
-      this.onNavigateExt(e.url);
-    }
-  },
-
-  onNavigateExt: _.debounce(function(url) {
-    // First try to get currently loaded page, so we can reload it when coming back.
-    // (debounce is needed on iOS, where onNavigate is called several times for one click)
-    this.app.executeScript({ code: 'window.location.toString()' }, wrapEventListener(function(a) {
-      this.showMessage("loading");
-      debug("got as current url: " + a[0]);
-      // Sometimes we get the previous URL, sometimes the current.
-      this.appLastUrl = this.isLocalUrl(a[0]) ? a[0] : LANDING_URL;
-      debug("on return will go back to: " + this.appLastUrl);
-      if (window.cordova.platformId === 'ios') {
-        // On iOS we need to take care to not mess up the WebView, use custom states for that.
-        // There may have been a loadstop event in the meantime. Detected by loadedStopUrl.
-        this.transition(this.loadedStopUrl === null ? "loading.ext" : "paused.ext", url);
-      } else {
-        // On Android we can just load the previous URL directly.
-        this.openSystemBrowser(url);
-        this.load(this.appLastUrl, "loading");
-      }
-    }.bind(this)));
-  }, 500, { rising: true, falling: false }),
-
-  onCustomScheme: function(e) {
-    debug("custom scheme: " + e.url);
+  onNavigate: function(e, cb) {
     if (e.url.match(/^app:\/\/mobile-scan\b/)) {
+      // barcode scanner opened
       var params = parseQueryString(e.url) || {};
       this.openScan(params.ret, !!params.redirect);
-    } else if (e.url.match(/^app:\/\/open\b/)) {
-      var url = parseQueryString(e.url).url;
-      debug("opening external link:" + url);
-      this.openSystemBrowser(url);
+    } else if (this.isLocalUrl(e.url)) {
+      // don't interfere with local urls
+      debug("internal link: " + e.url);
+      this.appLastUrl = e.url;
+      cb(e.url);
+    } else {
+      // all other links are opened in the system web browser
+      this.openSystemBrowser(e.url);
     }
   },
 
@@ -285,30 +214,35 @@ var Fsm = machina.Fsm.extend({
 
   openBrowser: function(url) {
     var _url = url || this.appLastUrl || LANDING_URL;
-    this.app = cordova.InAppBrowser.open(_url, "_blank", "location=no,zoom=no,shouldPauseOnSuspend=yes,toolbar=no,hidden=yes");
+    this.app = cordova.InAppBrowser.open(_url, "_blank", "location=no,zoom=no,shouldPauseOnSuspend=yes,toolbar=no,hidden=yes,beforeload=yes");
     // Connect state-machine to inAppBrowser events.
     this.app.addEventListener("loadstart",    wrapEventListener(this.handle.bind(this, "app.loadstart")), false);
     this.app.addEventListener("loadstop",     wrapEventListener(this.handle.bind(this, "app.loadstop")), false);
     this.app.addEventListener("loaderror",    wrapEventListener(function(e) {
       if (window.cordova.platformId === 'ios' && e.code === -999) {
         debug("ignoring cancelled load on iOS: " + e.url + ": " + e.message);
-      } else if (window.cordova.platformId === 'ios' && e.url.includes("#") &&
-                 e.message === "CDVWebViewDelegate: Navigation started when state=1") {
-        debug("activating iOS hash navigation workaround for " + e.url + ": " + e.message);
-        this.transition("loading.hashfix", e.url);
       } else {
         debug("page load failed for " + e.url + ": " + e.message);
         this.handle("app.loaderror", e);
       }
     }.bind(this)), false);
+    this.app.addEventListener("beforeload",   wrapEventListener(this.handle.bind(this, "app.beforeload")), false);
     this.app.addEventListener("exit",         wrapEventListener(this.handle.bind(this, "app.exit")), false);
-    this.app.addEventListener("customscheme", wrapEventListener(this.onCustomScheme.bind(this)), false);
   },
 
   openSystemBrowser: function(url) {
-    // Do not use InAppBrowser because it messes up opened inAppBrowser state.
-    window.plugins.launcher.launch({uri: url}, function(data){
-      debug("successfully opened external link");
+    var launcher = window.plugins.launcher;
+    // Need FLAG_ACTIVITY_NEW_TASK on Android 6 to make it clear that the page is
+    // opened in another app. Also, the back button doesn't bring you back from
+    // the system web browser to this app on Android 6, with this flag it does.
+    launcher.launch({uri: url, flags: launcher.FLAG_ACTIVITY_NEW_TASK}, function(data) {
+      if (data.isLaunched) {
+        debug("successfully opened external link: " + url);
+      } else if (data.isActivityDone) {
+        debug("returned from opening external link: " + url);
+      } else {
+        debug("unknown response when opening external link: " + JSON.stringify(data));
+      }
     }, function(errMsg) {
       debug("could not open external link: " + errMsg);
     });
@@ -390,31 +324,6 @@ var Fsm = machina.Fsm.extend({
       var base = parts[1], path = parts[2];
       return (base + path).match(this.localUrlRe) || (base === BASE_URL && path.match(this.localUrlRe));
     }
-  },
-
-  installClickListener: function() {
-    // Catch links that were clicked to route external ones through our custom protocol.
-    // We'd rather not do this in the loadstart event, because the page then already started loading.
-    this.app.executeScript({ code:
-      'window.addEventListener("click", function(e) {\n' +
-      '  if (e.target.tagName !== "A") return;\n' +
-      '  var href = e.target.href;\n' +
-      '  if (!href || href.startsWith("app:")) return;\n' +
-      '  var BASE_URL     = ' + JSON.stringify(BASE_URL) + ';\n' +
-      '  var SPLIT_URL_RE = ' + SPLIT_URL_RE.toString() + ';\n' +
-      '  var localUrlRe   = ' + this.localUrlRe.toString() + ';\n' +
-      '  var parts = href.match(SPLIT_URL_RE);\n' +
-      '  var base = parts[1], path = parts[2];\n' +
-      '  if (!(base + path).match(localUrlRe) && !(base === BASE_URL && path.match(localUrlRe))) {\n' +
-      '    e.preventDefault();\n' +
-      '    window.location.assign("app://open?url=" + encodeURIComponent(href));\n' +
-      '  }\n' +
-      '});\n' +
-      'console.log("installed click event listener for external links");\n'
-    }, function() {
-      // Also log in app console.
-      debug("installed click event listener for external links");
-    });
   }
 });
 var fsm = new Fsm();
