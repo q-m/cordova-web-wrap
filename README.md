@@ -88,6 +88,24 @@ will be opened in the app.
 </a>
 ```
 
+This app supports two barcodes scanners: the standard [barcodescanner](https://github.com/phonegap/phonegap-plugin-barcodescanner)
+and [Google Mobile Vision](https://github.com/dealrinc/cordova-gmv-barcode-scanner). The latter
+performs much better, but requires Google Play Services, which privacy-aware people may not
+have installed on their Android phones.
+
+By default the app detects if Google Play Services is present. It then uses Google Mobile Vision when
+it is and falls back to barcodescanner if it isn't. You'll need to include the Cordova plugins
+[`phonegap-plugin-barcodescanner`](https://github.com/phonegap/phonegap-plugin-barcodescanner),
+[`cordova-gmv-barcode-scanner`](https://github.com/dealrinc/cordova-gmv-barcode-scanner)
+and [`cordova-plugin-check-installed-services`](cordova-plugin-check-installed-services).
+Please use this option to cater for the most people.
+
+But when you really want to use only the Google Mobile Vision barcode scanner,
+just include the plugin [`cordova-gmv-barcode-scanner`](https://github.com/dealrinc/cordova-gmv-barcode-scanner).
+The app will detect this situation and always use this scanner. The same holds for
+the standard barcode scanner, just include the plugin [`cordova-gmv-barcode-scanner`](https://github.com/dealrinc/cordova-gmv-barcode-scanner)
+and not the other two.
+
 ## Adapating a website for the app
 
 This app shows a mobile website. Most of it would also work in a regular web browser, but
@@ -104,7 +122,8 @@ This can easily be done in two ways:
 ## Testing on the emulator
 
 To test the barcode scanner with the Android emulator, you can use the following
-procedure on Linux (based on [this](https://stackoverflow.com/a/35526103/2866660)).
+procedure on Linux (based on [this](https://stackoverflow.com/a/35526103/2866660)
+and [this](https://github.com/umlaeute/v4l2loopback/wiki/Ffmpeg)).
 
 ```sh
 # Check which video devices are available. Use the next number for 'video_nr' and in 'device'.
@@ -112,7 +131,10 @@ $ ls /dev/video*
 /dev/video0
 # Load the loopback video device
 $ sudo modprobe v4l2loopback video_nr=1 card_label="mockcam"
+
 # Create virtual webcam out of the image, substitute 'image.png' with your picture.
+$ ffmpeg -loop 1 -re -i image.jpg -f v4l2 -vcodec rawvideo -pix_fmt yuv420p /dev/video1
+# OR using gstreamer instead of ffmpeg
 $ gst-launch-1.0 filesrc location=image.png ! pngdec ! imagefreeze ! v4l2sink device=/dev/video1
 ```
 

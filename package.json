@@ -10,22 +10,17 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "wvengen",
-  "dependencies": {
-    "cordova-plugin-app-launcher": "^0.4.0",
-    "cordova-plugin-inappbrowser": "git+https://github.com/apache/cordova-plugin-inappbrowser.git#94fec84d5c81e64b89b4c216d02938d58ba61dbc",
-    "cordova-plugin-network-information": "^2.0.1",
-    "cordova-plugin-whitelist": "^1.3.3",
-    "phonegap-plugin-barcodescanner": "^7.1.2"
-  },
   "cordova": {
     "plugins": {
       "cordova-plugin-whitelist": {},
       "cordova-plugin-inappbrowser": {},
       "cordova-plugin-network-information": {},
+      "cordova-plugin-app-launcher": {},
       "phonegap-plugin-barcodescanner": {
         "ANDROID_SUPPORT_V4_VERSION": "27.+"
       },
-      "cordova-plugin-app-launcher": {}
+      "cordova-gmv-barcode-scanner": {},
+      "cordova-plugin-check-installed-services": {}
     },
     "platforms": []
   }

@@ -127,6 +127,14 @@ var Fsm = machina.Fsm.extend({
     document.addEventListener("pause",   wrapEventListener(this.handle.bind(this, "pause")), false);
     document.addEventListener("resume",  wrapEventListener(this.handle.bind(this, "resume")), false);
 
+    // query Google Play Services (see openScan)
+    if (typeof(CheckInstalledServices) !== 'undefined') {
+      CheckInstalledServices.check(
+        function(msg) { this.hasPlayServices = msg.isGooglePlayServicesAvailable; }.bind(this),
+        function(msg) { debug("openScan: CheckInstalledServices error: " + JSON.stringify(msg)); }
+      );
+    }
+
     // allow state transition to happen after this one
     setTimeout(function() {
       if (navigator.splashscreen) navigator.splashscreen.hide();
@@ -249,33 +257,96 @@ var Fsm = machina.Fsm.extend({
   },
 
   openScan: function(returnUrlTemplate) {
-    debug("openScan: " + returnUrlTemplate);
-    cordova.plugins.barcodeScanner.scan(
-      function(result) {
-        if (result.cancelled) {
-          debug("scan cancelled");
-          // necessary on iOS, see below
-          if (window.cordova.platformId === 'ios') this.showMessage(null);
-        } else {
-          debug("scan result: " + result.text);
-          this.openScanUrl(returnUrlTemplate, result.text);
-        }
-      }.bind(this),
-      function(error) {
-        debug("scan failed: " + error);
-        alert("Scan failed: " + error);
-        // necessary on iOS, see below
-        if (window.cordova.platformId === 'ios') this.showMessage(null);
-      }.bind(this),
-      {
-        saveHistory: true,
-        resultDisplayDuration: 500,
-        formats: "UPC_A,UPC_E,EAN_8,EAN_13",
-        disableSuccessBeep: true
+    // First detect what scanner we may use.
+    //   GMV = Google Mobile Vision barcode scanner
+    //   BS  = Standard Cordova barcode scanner
+    // We prefer GMV, but that requires Google Play Services. To keep apps working
+    // without (please support privacy-aware Android installations!), we use GMV
+    // when Google Play Services are available, but fallback to BS if not.
+    // (Unless you only included either GMV or BS, then this is always shown.)
+    var hasGMV = typeof(CDV) !== 'undefined';
+    var useGMV = hasGMV;
+    var hasBS = typeof(cordova.plugins.barcodeScanner) !== 'undefined';
+    var useBS = hasBS;
+
+    debug("openScan: hasGMV=" + hasGMV.toString() + ", hasBS=" + hasBS.toString());
+
+    if (hasGMV && hasBS) {
+      // It doesn't make sense to have GMV and BS without the check.
+      if (typeof(this.hasPlayServices) === 'undefined') {
+        debug("openScan: could not detect whether Google Play Services is present, "
+              + "please make sure cordova-plugin-check-installed-services is installed!");
       }
-    );
+
+      if (this.hasPlayServices) {
+        debug("openScan: Google Play Services found, using GMV");
+      } else {
+        debug("openScan: Google Play Services not found, not using GMV");
+        useGMV = false;
+      }
+    }
+
+    // Prefer Google Mobile Vision barcode scanner. But GMV only works when Google
+    // Play Services are installed (otherwise it will show a warning). So when both
+    // GMV and BS are installed, require that the CheckInstalledServices plugin is
+    // available
+    if (useGMV) {
+      debug("openScan[GMV]: " + returnUrlTemplate);
+      CDV.scanner.scan({UPCA: true, UPCE: true, EAN8: true, EAN13: true}, function(err, result) {
+        if (err && err.cancelled) {
+          this.scanCancelled();
+        } else if (err) {
+          this.scanFailed(err.message);
+        } else if (result) {
+          debug("scan result: " + result);
+          this.openScanUrl(returnUrlTemplate, result);
+        } else {
+          this.scanFailed("unknown reason");
+        }
+      }.bind(this));
+
+    // else try Cordova Barcode scanner
+    } else if (useBS) {
+      debug("openScan[barcodeScanner]: " + returnUrlTemplate);
+      cordova.plugins.barcodeScanner.scan(
+        function(result) {
+          if (result.cancelled) {
+            this.scanCancelled();
+          } else {
+            debug("scan result: " + result.text);
+            this.openScanUrl(returnUrlTemplate, result.text);
+          }
+        }.bind(this),
+        function(error) {
+          this.scanFailed(error);
+        }.bind(this),
+        {
+          saveHistory: true,
+          resultDisplayDuration: 500,
+          formats: "UPC_A,UPC_E,EAN_8,EAN_13",
+          disableSuccessBeep: true
+        }
+      );
+    } else {
+      debug("openScan: no scanner plugin available");
+      alert("scan failed: no scanner plugin available");
+      return false;
+    }
     // necessary on iOS, see https://github.com/phonegap/phonegap-plugin-barcodescanner/issues/570
     if (window.cordova.platformId === 'ios') this.showMessage("scanning");
+  },
+
+  scanCancelled: function() {
+    debug("scan cancelled");
+    // necessary on iOS, see above
+    if (window.cordova.platformId === 'ios') this.showMessage(null);
+  },
+
+  scanFailed: function(err) {
+    debug("scan failed: " + error);
+    alert("Scan failed: " + error);
+    // necessary on iOS, see above
+    if (window.cordova.platformId === 'ios') this.showMessage(null);
   },
 
   openScanUrl: function(returnUrlTemplate, barcode) {
