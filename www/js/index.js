@@ -260,7 +260,8 @@ var Fsm = machina.Fsm.extend({
     // First detect what scanner we may use.
     //   GMV = Google Mobile Vision barcode scanner
     //   BS  = Standard Cordova barcode scanner
-    // We prefer GMV, but that requires Google Play Services. To keep apps working
+    // We prefer GMV, but that requires Google Play Services on Android (on iOS,
+    // the required code seems to be bundled with the app). To keep apps working
     // without (please support privacy-aware Android installations!), we use GMV
     // when Google Play Services are available, but fallback to BS if not.
     // (Unless you only included either GMV or BS, then this is always shown.)
@@ -271,7 +272,7 @@ var Fsm = machina.Fsm.extend({
 
     debug("openScan: hasGMV=" + hasGMV.toString() + ", hasBS=" + hasBS.toString());
 
-    if (hasGMV && hasBS) {
+    if (window.cordova.platformId === 'android' && hasGMV && hasBS) {
       // It doesn't make sense to have GMV and BS without the check.
       if (typeof(this.hasPlayServices) === 'undefined') {
         debug("openScan: could not detect whether Google Play Services is present, "
@@ -363,7 +364,9 @@ var Fsm = machina.Fsm.extend({
     // Be a bit safer and only keep numbers (XSS risk).
     var safeBarcode = barcode.replace(/[^\d]/g, '');
     var url = returnUrlTemplate.replace('{CODE}', safeBarcode);
-    this.load(url, "finding");
+    setTimeout(function() {
+      this.load(url, "finding");
+    }, 0);
     return true;
   },
 
