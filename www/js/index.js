@@ -366,7 +366,7 @@ var Fsm = machina.Fsm.extend({
     var url = returnUrlTemplate.replace('{CODE}', safeBarcode);
     setTimeout(function() {
       this.load(url, "finding");
-    }, 0);
+    }.bind(this), 0);
     return true;
   },
 
