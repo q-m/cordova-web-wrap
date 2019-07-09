@@ -222,7 +222,7 @@ var Fsm = machina.Fsm.extend({
 
   openBrowser: function(url) {
     var _url = url || this.appLastUrl || LANDING_URL;
-    this.app = cordova.InAppBrowser.open(_url, "_blank", "location=no,zoom=no,shouldPauseOnSuspend=yes,toolbar=no,hidden=yes,beforeload=yes");
+    this.app = cordova.InAppBrowser.open(_url, "_blank", "location=no,zoom=no,shouldPauseOnSuspend=yes,toolbar=no,hidden=yes,beforeload=get");
     // Connect state-machine to inAppBrowser events.
     this.app.addEventListener("loadstart",    wrapEventListener(this.handle.bind(this, "app.loadstart")), false);
     this.app.addEventListener("loadstop",     wrapEventListener(this.handle.bind(this, "app.loadstop")), false);
