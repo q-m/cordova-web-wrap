@@ -229,6 +229,12 @@ var Fsm = machina.Fsm.extend({
     this.app.addEventListener("loaderror",    wrapEventListener(function(e) {
       if (window.cordova.platformId === 'ios' && e.code === -999) {
         debug("ignoring cancelled load on iOS: " + e.url + ": " + e.message);
+      } if (window.cordova.platformId === 'ios' && e.code === 102) {
+        // After a redirect from the server, iOS gives this error.
+        // Downside: perhaps when a page load is interrupted, we might also see this.
+        // After scanning a barcode one may redirect, so we favour that use-case here.
+        // (hopefully this can be removed after inAppBrowser switched to WKWebView)
+        debug("ignoring interrupted frameload on iOS (to allow redirect): " + e.url + ": " + e.message);
       } else {
         debug("page load failed for " + e.url + ": " + e.message);
         this.handle("app.loaderror", e);
